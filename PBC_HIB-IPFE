@@ -1,0 +1,189 @@
+#include <pbc/pbc.h>
+#include <pbc/pbc_test.h>
+
+#define VECTOR_SIZE 30  // 定义向量大小
+#define VECTOR_SIZE_2 20 // 向量维度
+
+// 初始化向量的函数，维度 l，分量为群元素
+void init_vector(element_t *vec, pairing_t pairing) {
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        element_init_G1(vec[i], pairing);
+        element_random(vec[i]);
+    }
+}
+
+// 初始化向量的函数，维度 l，分量为整数
+void init_vector_1(element_t *vec, pairing_t pairing) {
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        element_init_Zr(vec[i], pairing);
+        element_random(vec[i]);
+    }
+}
+
+// 初始化向量的函数，维度 n，分量为整数
+void init_vector_2(element_t *vec, pairing_t pairing) {
+    for (int i = 0; i < VECTOR_SIZE_2; i++) {
+        element_init_Zr(vec[i], pairing);
+        element_random(vec[i]);
+    }
+}
+
+// 初始化元素
+void init_elements(pairing_t pairing, element_t *g, element_t *g2, element_t *g3, element_t *g0, element_t *g1, element_t *alpha, element_t *u, element_t h[VECTOR_SIZE]) {
+    element_init_G1(*g, pairing);
+    element_init_G1(*g2, pairing);
+    element_init_G1(*g3, pairing);
+	element_init_G1(*g0, pairing);
+    element_init_G1(*g1, pairing);
+	element_init_GT(*u, pairing);
+    element_init_Zr(*alpha, pairing);
+
+    element_random(*g);
+    element_random(*g2);
+    element_random(*g3);
+    element_random(*alpha);
+
+    element_pow_zn(*g1, *g, *alpha);
+    element_pow_zn(*g0, *g2, *alpha);
+    init_vector(h, pairing);
+    pairing_apply(*u, *g1, *g2, pairing);
+}
+
+int main(int argc, char **argv) {
+    pairing_t pairing;
+    element_t id[VECTOR_SIZE], x[VECTOR_SIZE_2], y[VECTOR_SIZE_2], S[VECTOR_SIZE];
+    element_t g, g0, g1, g2, g3, r, K0, K1, alpha, u, h[VECTOR_SIZE];
+	
+
+    // 初始化配对
+    pbc_demo_pairing_init(pairing, argc, argv);
+
+    // 初始化元素
+    init_elements(pairing, &g, &g2, &g3, &g0, &g1, &alpha, &u, h);
+
+    // Setup Phase
+    double t0 = pbc_get_time();
+    printf("Setup Phase-----= %fs\n", t0);
+
+    // KeyGen Phase
+    double t2 = pbc_get_time();
+    init_vector_1(id, pairing);
+    init_vector_2(y, pairing);
+	init_vector(S, pairing);
+    element_init_Zr(r, pairing);
+    element_init_G1(K0, pairing);
+    element_init_G1(K1, pairing);
+
+		// 计算 K0
+    element_t g0y;
+    element_init_G1(g0y, pairing);
+    element_set1(g0y);
+
+    for (int j = 0; j < VECTOR_SIZE_2; j++) {
+        element_t temp;
+        element_init_G1(temp, pairing);
+        element_pow_zn(temp, g0, y[j]);
+        element_mul_zn(g0y, g0y, temp);
+        element_clear(temp);
+    }
+
+    element_t hid;
+    element_init_G1(hid, pairing);
+    element_set1(hid);
+
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        element_t temp;
+        element_init_G1(temp, pairing);
+        element_pow_zn(temp, h[i], id[i]);
+        element_mul_zn(hid, hid, temp);
+        element_clear(temp);
+    }
+
+    element_t tmp;
+    element_init_G1(tmp, pairing);
+    element_mul_zn(tmp, hid, g3);
+    element_pow_zn(tmp, tmp, r);
+    element_mul_zn(K0, g0y, tmp);
+		// K0 END
+    element_pow_zn(K1, g, r);
+
+    double t3 = pbc_get_time();
+    printf("KeyGen Phase-----= %fs\n", t3 - t2);
+
+    // Enc Phase
+    double t4 = pbc_get_time();
+    element_t s, C1, us, C2, C3;
+    element_init_Zr(s, pairing);
+    element_init_GT(C1, pairing);
+    element_init_GT(us, pairing);
+    element_init_G1(C2, pairing);
+    element_init_G1(C3, pairing);
+	init_vector_2(x, pairing);
+
+    element_random(s);
+    element_set1(C1);
+    for (int j = 0; j < VECTOR_SIZE_2; j++) {
+        element_t temp;
+        element_init_GT(temp, pairing);
+        pairing_apply(temp, g1, g2, pairing);
+        element_pow_zn(temp, temp, x[j]);
+        element_mul_zn(C1, C1, temp);
+        element_clear(temp);
+    }
+
+    element_pow_zn(us, u, s);
+    element_mul_zn(C1, C1, us);
+    element_pow_zn(C2, g, s);
+
+    element_t hid1;
+    element_init_G1(hid1, pairing);
+    element_set1(hid1);
+    for (int i = 0; i < VECTOR_SIZE; i++) {
+        element_t temp;
+        element_init_G1(temp, pairing);
+        element_pow_zn(temp, h[i], id[i]);
+        element_mul_zn(hid1, hid1, temp);
+        element_clear(temp);
+    }
+
+    element_mul_zn(C3, hid1, g3);
+    element_pow_zn(C3, C3, s);
+
+    double t5 = pbc_get_time();
+    printf("Enc Phase-----= %fs\n", t5 - t4);
+	
+	// Dec Phase
+    double t6 = pbc_get_time();
+    element_t A1, A2, A3;
+    element_init_GT(A1, pairing);
+	element_init_GT(A2, pairing);
+	element_init_GT(A3, pairing);
+
+	element_set1(A1); 
+	for (int j = 0; j < VECTOR_SIZE_2; j++) {
+        element_t temp;
+        element_init_GT(temp, pairing);
+		pairing_apply(temp, g1, g2, pairing);
+        element_pow_zn(temp, C1, y[j]);
+        element_mul_zn(A1, A1, temp);
+		element_clear(temp);
+    }
+	pairing_apply(A2, C3, K1, pairing);
+	pairing_apply(A3, C2, K0, pairing);
+	
+	element_t decResult;
+	element_init_GT(decResult, pairing);
+	element_mul_zn(decResult, A1, A2);
+	// 使用 element_neg 来取负值
+    element_t neg_A3;
+	element_init_GT(neg_A3, pairing);  // 初始化负数变量
+	element_neg(neg_A3, A3);
+	element_mul_zn(decResult, decResult, neg_A3);
+    
+    double t7 = pbc_get_time();
+    printf("Dec Phase-----= %fs\n", t7 - t6);
+	
+    printf("Total time-----= %fs\n", t7 - t0);
+    pairing_clear(pairing);
+	
+}
